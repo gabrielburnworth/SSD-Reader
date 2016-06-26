@@ -16,7 +16,7 @@ import sys, time, pickle
 calibration_image = 0 # 1 to aid in calibration
 # SSD location (from top left of entire image)
 #  as percent (0 - 1) of image:
-#                x     y   height width
+#                x     y   width height
 SSD_location = [0.23, 0.26, 0.17, 0.19]
 rotation = 1 # degrees
 number_of_digits = 4
@@ -90,7 +90,7 @@ def find_segments(digit, y):
     """Define SSD digit segment regions."""
     x1, x2 = digit[0], digit[1]
     #cv2.rectangle(annotated, (x1, 0), (x2, y), (255, 0, 0), 2)
-    
+
     dx = x2 - x1
     c1 = x1
     c2 = int(x1 + dx * 0.2)
@@ -115,18 +115,17 @@ def find_segments(digit, y):
 
 def get_image():
     """Get image and crop it to SSD."""
-
     with PiCamera() as camera:
         camera.resolution = (1920, 1088)
         rawCapture = PiRGBArray(camera)
         time.sleep(0.1)
         camera.capture(rawCapture, format="bgr")
         image = rawCapture.array
-    
+
     rows, cols, o = image.shape
     Mtrx = cv2.getRotationMatrix2D((cols / 2, rows / 2), rotation, 1)
     rotated = cv2.warpAffine(image, Mtrx, (cols, rows))
-    
+
     cx = int(SSD_location[0] * cols)
     cy = int(SSD_location[1] * rows)
     cxe = int(cx + SSD_location[2] * cols)
@@ -162,7 +161,8 @@ def find_number(SSD_images, segment_locations):
         x1_1, x2_1 = segment_location[0][0], segment_location[0][1]
         y1_1, y2_1 = segment_location[1][0], segment_location[1][1]
         segment_image = thresh[y1_1:y2_1, x1_1:x2_1]
-        if segment_image.mean(axis=0).mean() < threshold:
+        segment_average_pixel_value = segment_image.mean(axis=0).mean()
+        if segment_average_pixel_value < threshold:
            cv2.rectangle(interpretation, (x1_1, y1_1), 
                   (x2_1, y2_1), (0, 0, 0), -1) # draw interpreted segment
            umber[s] = 1
@@ -239,7 +239,7 @@ def read_SSD():
     y, x, o = SSD.shape
     digits = find_digits(x)
     number = [0] * number_of_digits
-    
+
     all_segment_images = []
     for it, digit in enumerate(digits):
         segment_locations = find_segments(digit, y)
