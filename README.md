@@ -3,7 +3,7 @@ Read a seven-segment display (SSD) using OpenCV and the Raspberry Pi Camera
 
 __Install OpenCV and required modules on Raspbian:__
 ```
-sudo apt-get install python-opencv python-numpy python-picamera python-matplotlib
+sudo apt-get install python-opencv python-numpy python-picamera python-matplotlib python-scipy
 ```
 
 __Run the script:__
