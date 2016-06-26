@@ -180,7 +180,7 @@ def show_plot(SSD_images, reading, plot_images, action):
         ax = fig.add_subplot(gs[:, 0])
         npminute = np.array(minute)
         line, = ax.plot(npminute[:, 0], npminute[:, 1], 'k-', lw=2)
-        ax.set_ylim(300, 2000)
+        ax.set_ylim(0, 10000)
         ax2 = fig.add_subplot(gs[0, 1])
         ax2.axis("off")
         ax3 = fig.add_subplot(gs[1, 1])
@@ -271,6 +271,7 @@ def read_SSD():
 if __name__ == "__main__":
     ## Log/Plot Option
     showplot = 1 # show the SSD and a plot of the last minute of values
+    record = 1
 
     if calibration_image or debug:
         showplot = 0
