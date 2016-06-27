@@ -183,6 +183,8 @@ def show_plot(SSD_images, reading, minute, plot_images, action):
         ax = fig.add_subplot(gs[:, 0])
         line, = ax.plot(minute[:, 0], minute[:, 1], 'k-', lw=2)
         ax.set_xlim(-60, 0)
+        ax.set_xlabel("Time (seconds)", weight='bold')
+        ax.set_ylabel("Reading", weight='bold')
         ax2 = fig.add_subplot(gs[0, 1])
         ax2.axis("off")
         ax3 = fig.add_subplot(gs[1, 1])
