@@ -17,7 +17,7 @@ calibration_image = 0 # 1 to aid in calibration
 # SSD location (from top left of entire image)
 #  as percent (0 - 1) of image:
 #                x     y   width height
-SSD_location = [0.23, 0.26, 0.17, 0.19]
+SSD_location = [0.23, 0.28, 0.17, 0.19]
 rotation = 1 # degrees
 number_of_digits = 4
 blur_value = 25
@@ -154,7 +154,8 @@ def find_number(SSD_images, segment_locations):
        Get list of segment images for debug."""
     thresh = SSD_images[1]
     annotated = SSD_images[2]
-    interpretation = SSD_images[3]
+    region_view = SSD_images[3]
+    interpretation = SSD_images[4]
     umber = [0] * len(segment_locations)
     segment_images = []
     for s, segment_location in enumerate(segment_locations):
@@ -163,6 +164,7 @@ def find_number(SSD_images, segment_locations):
         segment_image = thresh[y1_1:y2_1, x1_1:x2_1]
         segment_average_pixel_value = segment_image.mean(axis=0).mean()
         if segment_average_pixel_value < threshold:
+           region_view[y1_1:y2_1, x1_1:x2_1] = segment_image
            cv2.rectangle(interpretation, (x1_1, y1_1), 
                   (x2_1, y2_1), (0, 0, 0), -1) # draw interpreted segment
            umber[s] = 1
@@ -171,33 +173,45 @@ def find_number(SSD_images, segment_locations):
                      (x2_1, y2_1), (255, 0, 0), 2) # draw segment region
     return n(umber), segment_images
 
-def show_plot(SSD_images, reading, plot_images, action):
+def show_plot(SSD_images, reading, minute, plot_images, action):
     """Show a plot of the last minute of values."""
     if action == "setup":
         plt.ion()
         fig = plt.figure()
-        gs = GridSpec(2, 2)
+        fig.canvas.set_window_title('SSD Reader')
+        gs = GridSpec(3, 2)
         ax = fig.add_subplot(gs[:, 0])
-        npminute = np.array(minute)
-        line, = ax.plot(npminute[:, 0], npminute[:, 1], 'k-', lw=2)
-        ax.set_ylim(0, 10000)
+        line, = ax.plot(minute[:, 0], minute[:, 1], 'k-', lw=2)
+        ax.set_xlim(-60, 0)
         ax2 = fig.add_subplot(gs[0, 1])
         ax2.axis("off")
         ax3 = fig.add_subplot(gs[1, 1])
         ax3.axis("off")
-        return line, fig, [ax, ax2, ax3]
+        ax4 = fig.add_subplot(gs[2, 1])
+        ax4.axis("off")
+        return line, fig, [ax, ax2, ax3, ax4]
     elif action == "plot":
         SSD = SSD_images[0]
-        interpretation = SSD_images[3]
-        minute.append([time.time(), reading])
-        minute.pop(0)
-        npminute = np.array(minute)
-        plot_line.set_xdata(npminute[:, 0])
-        plot_line.set_ydata(npminute[:, 1])
-        plot_axes[0].set_xlim(time.time() - 60, time.time())
+        region_view = SSD_images[3]
+        interpretation = SSD_images[4]
+        now = time.time()
+        minute = np.append(minute, np.array([[now, reading]]), axis=0)
+        minute = np.delete(minute, 0, axis=0)
+        pminute = np.copy(minute)
+        for m in range(len(pminute)):
+            pminute[m][0] -= now
+        plot_line.set_xdata(pminute[:, 0])
+        plot_line.set_ydata(pminute[:, 1])
+        min_readings = pminute[:, 1]
+        plot_axes[0].set_ylim(np.min(min_readings)
+                              - abs(np.min(min_readings) * 0.1),
+                              np.max(min_readings)
+                              + abs(np.max(min_readings) * 0.1))
         plot_images[0].set_data(SSD)
-        plot_images[1].set_data(interpretation)
+        plot_images[1].set_data(region_view)
+        plot_images[2].set_data(interpretation)
         plot_fig.canvas.draw()
+        return minute
 
 def debug_plots(segment_images):
     """Debug plots."""
@@ -230,11 +244,14 @@ def read_SSD():
     global imgshown
     global plot_images
     global data
+    global minute
     SSD = get_image()
     thresh = process_image(SSD)
     annotated = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
     interpretation = np.full_like(thresh, 255)
-    SSD_images = [SSD, thresh, annotated, interpretation]
+    region_view = thresh.copy()
+    region_view[thresh == 0] = 200
+    SSD_images = [SSD, thresh, annotated, region_view, interpretation]
 
     y, x, o = SSD.shape
     digits = find_digits(x)
@@ -256,10 +273,11 @@ def read_SSD():
     if showplot:
         if not imgshown:
             plotimage_SSD = plot_axes[1].imshow(SSD)
-            plotimage_iSSD = plot_axes[2].imshow(interpretation, cmap='binary_r')
-            plot_images = [plotimage_SSD, plotimage_iSSD]
+            plotimage_rvSSD = plot_axes[2].imshow(region_view, cmap='binary_r')
+            plotimage_iSSD = plot_axes[3].imshow(interpretation, cmap='binary_r')
+            plot_images = [plotimage_SSD, plotimage_rvSSD, plotimage_iSSD]
             imgshown = True
-        show_plot(SSD_images, reading, plot_images, "plot")
+        minute = show_plot(SSD_images, reading, minute, plot_images, "plot")
 
     if debug:
         cv2.imshow("SSD", SSD)
@@ -284,8 +302,9 @@ if __name__ == "__main__":
             data = np.empty((0, 2))
 
     if showplot:
-        minute = [[time.time() - i, 0] for i in range(0, 60)]
-        plot_line, plot_fig, plot_axes = show_plot(0, 0, 0, "setup")
+        minute = np.array(
+            [[time.time() + i, 0] for i in range(-int(60 / (delay + 1.9)), 0)])
+        plot_line, plot_fig, plot_axes = show_plot(0, 0, minute, 0, "setup")
         imgshown = False
         plot_images = []
     else:
@@ -299,4 +318,5 @@ if __name__ == "__main__":
             time.sleep(delay)
 
     except KeyboardInterrupt:
-        sys.exit()
+        time.sleep(0.5)
+        print " Ended."
