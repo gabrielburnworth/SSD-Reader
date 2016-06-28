@@ -17,12 +17,14 @@ calibration_image = 0 # 1 to aid in calibration
 # SSD location (from top left of entire image)
 #  as percent (0 - 1) of image:
 #                x     y   width height
-SSD_location = [0.23, 0.28, 0.17, 0.19]
-rotation = 1 # degrees
+SSD_location = [0.27, 0.35, 0.155, 0.165]
+rotation = 6 # degrees
 number_of_digits = 4
-blur_value = 25
-thresh_value = 27
-threshold = 200 # region average pixel value segment detection limit
+blur_block_size = 25 # odd
+threshold_block_size = 31 # odd
+threshold_constant = 3
+threshold = 110 # region average pixel value segment detection limit
+morph_block_size = 8
 delay = 0.5 # delay after each record
 
 ## Debugging
@@ -33,18 +35,12 @@ showplot = 0; record = 0 # for use as module
 
 def find_digits(x):
     """Define SSD digit regions."""
-    digits = []; dk0 = 0.24 * (1. / (number_of_digits * 2))
-    dk = dk0
+    digits = []; dk = 0.24 * (1. / (number_of_digits * 2))
     digit_percent = 1. / number_of_digits
     digit_width = digit_percent - dk * 2
     for dn in range(0, number_of_digits):
-        edgeL, edgeR = 0.00, 0.00
-        if dn == 0:
-            edgeL = dk0
-        if dn == (number_of_digits - 1):
-            edgeR = dk0
-        digit_x_begin = int(x * (dk - edgeL))
-        digit_x_end = int(x * (dk + digit_width + edgeR))
+        digit_x_begin = int(x * dk)
+        digit_x_end = int(x * (dk + digit_width))
         digits.append([digit_x_begin, digit_x_end])
         dk += digit_percent
     return digits
@@ -72,7 +68,6 @@ c1  c2        c3    c4
 
 def n(segment_values):
     """Return the displayed value of the SSD digit."""
-    segment_values = ''.join([str(v) for v in segment_values])
     return {
        '1110111': 0,
        '0010010': 1,
@@ -89,8 +84,6 @@ def n(segment_values):
 def find_segments(digit, y):
     """Define SSD digit segment regions."""
     x1, x2 = digit[0], digit[1]
-    #cv2.rectangle(annotated, (x1, 0), (x2, y), (255, 0, 0), 2)
-
     dx = x2 - x1
     c1 = x1
     c2 = int(x1 + dx * 0.2)
@@ -126,14 +119,14 @@ def get_image():
     Mtrx = cv2.getRotationMatrix2D((cols / 2, rows / 2), rotation, 1)
     rotated = cv2.warpAffine(image, Mtrx, (cols, rows))
 
-    cx = int(SSD_location[0] * cols)
-    cy = int(SSD_location[1] * rows)
-    cxe = int(cx + SSD_location[2] * cols)
-    cye = int(cy + SSD_location[3] * rows)
-    SSD = rotated[cy:cye, cx:cxe]
+    SSDx1 = int(SSD_location[0] * cols)
+    SSDy1 = int(SSD_location[1] * rows)
+    SSDx2 = int(SSDx1 + SSD_location[2] * cols)
+    SSDy2 = int(SSDy1 + SSD_location[3] * rows)
+    SSD = rotated[SSDy1:SSDy2, SSDx1:SSDx2]
     if calibration_image:
         cropbox_SSD = rotated.copy()
-        cv2.rectangle(cropbox_SSD, (cx, cy), (cxe, cye), (255, 0, 0), 3)
+        cv2.rectangle(cropbox_SSD, (SSDx1, SSDy1), (SSDx2, SSDy2), (255, 0, 0), 3)
         cv2.imshow("Image", cropbox_SSD)
         cv2.waitKey(0)
         cv2.destroyWindow("Image")
@@ -144,9 +137,12 @@ def get_image():
 def process_image(SSD):
     """Process SSD image."""
     gray = cv2.cvtColor(SSD, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (blur_value, blur_value), 0)
+    blur = cv2.GaussianBlur(gray, (blur_block_size, blur_block_size), 0)
     thresh = cv2.adaptiveThreshold(blur, 255, 
-          cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, thresh_value, 2)
+          cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,
+          threshold_block_size, threshold_constant)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_ERODE,
+          np.ones((morph_block_size, morph_block_size), np.uint8))
     return thresh
 
 def find_number(SSD_images, segment_locations):
@@ -156,21 +152,23 @@ def find_number(SSD_images, segment_locations):
     annotated = SSD_images[2]
     region_view = SSD_images[3]
     interpretation = SSD_images[4]
-    umber = [0] * len(segment_locations)
+    umber = ''
     segment_images = []
-    for s, segment_location in enumerate(segment_locations):
-        x1_1, x2_1 = segment_location[0][0], segment_location[0][1]
-        y1_1, y2_1 = segment_location[1][0], segment_location[1][1]
-        segment_image = thresh[y1_1:y2_1, x1_1:x2_1]
+    for segment_location in segment_locations:
+        x1, x2 = segment_location[0][0], segment_location[0][1]
+        y1, y2 = segment_location[1][0], segment_location[1][1]
+        segment_image = thresh[y1:y2, x1:x2]
         segment_average_pixel_value = segment_image.mean(axis=0).mean()
         if segment_average_pixel_value < threshold:
-           region_view[y1_1:y2_1, x1_1:x2_1] = segment_image
-           cv2.rectangle(interpretation, (x1_1, y1_1), 
-                  (x2_1, y2_1), (0, 0, 0), -1) # draw interpreted segment
-           umber[s] = 1
+           region_view[y1:y2, x1:x2] = segment_image # show captured area
+           cv2.rectangle(interpretation, (x1, y1),
+                  (x2, y2), (0, 0, 0), -1) # draw interpreted segment
+           umber += '1'
+        else:
+           umber += '0'
         segment_images.append(segment_image)
-        cv2.rectangle(annotated, (x1_1, y1_1), 
-                     (x2_1, y2_1), (255, 0, 0), 2) # draw segment region
+        cv2.rectangle(annotated, (x1, y1),
+                     (x2, y2), (255, 0, 0), 2) # draw segment region
     return n(umber), segment_images
 
 def show_plot(SSD_images, reading, minute, plot_images, action):
@@ -196,49 +194,54 @@ def show_plot(SSD_images, reading, minute, plot_images, action):
         SSD = SSD_images[0]
         region_view = SSD_images[3]
         interpretation = SSD_images[4]
+        # append new data and pop first record
         now = time.time()
         minute = np.append(minute, np.array([[now, reading]]), axis=0)
         minute = np.delete(minute, 0, axis=0)
+        # convert to seconds from now for plotting
         pminute = np.copy(minute)
         for m in range(len(pminute)):
             pminute[m][0] -= now
-        plot_line.set_xdata(pminute[:, 0])
-        plot_line.set_ydata(pminute[:, 1])
-        min_readings = pminute[:, 1]
-        plot_axes[0].set_ylim(np.min(min_readings)
-                              - abs(np.min(min_readings) * 0.1),
-                              np.max(min_readings)
-                              + abs(np.max(min_readings) * 0.1))
+        minute_time = pminute[:, 0]
+        minute_readings = pminute[:, 1]
+        # plot
+        plot_line.set_xdata(minute_time)
+        plot_line.set_ydata(minute_readings)
+        plot_axes[0].set_ylim(np.min(minute_readings)
+                              - abs(np.min(minute_readings) * 0.1),
+                              np.max(minute_readings)
+                              + abs(np.max(minute_readings) * 0.1))
         plot_images[0].set_data(SSD)
         plot_images[1].set_data(region_view)
         plot_images[2].set_data(interpretation)
         plot_fig.canvas.draw()
         return minute
 
-def debug_plots(segment_images):
-    """Debug plots."""
-    cv2.imshow("Interpretation", interpretation)
+def debug_plots(SSD_images, all_segment_images):
+    """Debug plots: annotated SSD with regions, interpreted SSD.
+       More debug: exploded view of each digit with average
+       pixel values of segments."""
+    annotated = SSD_images[2]
+    interpretation = SSD_images[4]
     cv2.imshow("Annotated", annotated)
+    cv2.imshow("Interpretation", interpretation)
     cv2.waitKey(0)
     if debug_more:
-        for segment_images in all_segment_images:
+        for di, segment_images in enumerate(all_segment_images):
             fig2 = plt.figure()
+            fig2.canvas.set_window_title('Digit {}'.format(di))
             def debug_plot_segment(plot_location, segment):
                 segment_image = segment_images[segment]
                 avg = segment_image.mean(axis=0).mean()
                 axp = fig2.add_subplot(5, 3, plot_location)
-                axp.set_title('{:.2f}'.format(avg))
+                axp.set_title('{:.0f}'.format(avg))
                 axp.axis('off')
                 cmap = 'binary_r'
                 if avg == 255: cmap = 'binary'
                 axp.imshow(segment_image, cmap=cmap)
-            debug_plot_segment(4, 0)
-            debug_plot_segment(2, 1)
-            debug_plot_segment(6, 2)
-            debug_plot_segment(8, 3)
-            debug_plot_segment(10, 4)
-            debug_plot_segment(12, 5)
-            debug_plot_segment(14, 6)
+            segment_plot_locations = [4, 2, 6, 8, 10, 12, 14]
+            for s, spl in enumerate(segment_plot_locations):
+                debug_plot_segment(spl, s)
             plt.show()
 
 def read_SSD():
@@ -252,23 +255,22 @@ def read_SSD():
     annotated = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
     interpretation = np.full_like(thresh, 255)
     region_view = thresh.copy()
-    region_view[thresh == 0] = 200
+    region_view[thresh == 0] = 200 # to grey out black pixels outside regions
     SSD_images = [SSD, thresh, annotated, region_view, interpretation]
 
     y, x, o = SSD.shape
     digits = find_digits(x)
-    number = [0] * number_of_digits
+    reading = 0
 
     all_segment_images = []
     for it, digit in enumerate(digits):
         segment_locations = find_segments(digit, y)
-        number[it], segment_images = find_number(SSD_images, segment_locations)
+        digit_value, segment_images = find_number(SSD_images, segment_locations)
         all_segment_images.append(segment_images)
-
-    reading = int(''.join([str(val) for val in number]))
+        reading += digit_value * 10**(number_of_digits - 1 - it)
 
     if debug:
-        debug_plots(segment_images)
+        debug_plots(SSD_images, all_segment_images)
     elif record:
         data = np.vstack((data, np.array([time.time(), reading])))
         pickle.dump(data, file('SSD_data.pkl', 'wb'))
@@ -291,7 +293,7 @@ def read_SSD():
 if __name__ == "__main__":
     ## Log/Plot Option
     showplot = 1 # show the SSD and a plot of the last minute of values
-    record = 1
+    record = 1 # save the data to file
 
     if calibration_image or debug:
         showplot = 0
@@ -304,7 +306,7 @@ if __name__ == "__main__":
             data = np.empty((0, 2))
 
     if showplot:
-        minute = np.array(
+        minute = np.array( # line data for plot initialization
             [[time.time() + i, 0] for i in range(-int(60 / (delay + 1.9)), 0)])
         plot_line, plot_fig, plot_axes = show_plot(0, 0, minute, 0, "setup")
         imgshown = False
